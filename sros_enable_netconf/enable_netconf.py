@@ -1,7 +1,9 @@
 """Programmatically Enable NETCONF on SROS Device."""
+
 import argparse
 import getpass
 import os
+import re
 
 import xmltodict
 from netmiko import ConnectHandler
@@ -18,16 +20,14 @@ from sros_enable_netconf.helpers import (
 
 # Define the NETCONF USERNAME / PASSWORD, PICK UP ENV VARS OR USE DEFAULT.
 NETCONF_USER = os.getenv("NETCONF_USER", "netconf")
-NETCONF_PASS = os.getenv("NETCONF_PASS", "NCadmin123")
+NETCONF_PASS = os.getenv("NETCONF_PASS")
 BACKUP_PATH = os.getenv("BACKUP_PATH", "backups")
 
 
 def get_arguments():
     """Get argparse arguments."""
-    parser = argparse.ArgumentParser(
-        description="Command Line Driven Utility To Enable NETCONF\
-        And MD-CLI on SROS Devices."
-    )
+    parser = argparse.ArgumentParser(description="Command Line Driven Utility To Enable NETCONF\
+        And MD-CLI on SROS Devices.")
     parser.add_argument("-n", "--node", help="Target NODE IP", required=True)
     parser.add_argument("-u", "--user", help="SSH Username", required=False, default="admin")
     parser.add_argument("-p", "--port", help="NETCONF TCP Port", required=False, default="830")
@@ -39,6 +39,12 @@ def main():
     """Execute main function."""
     # Extract the Arguements from ARGSPARSE:
     args = get_arguments()
+    # Never provision a remote account with a shared default password.
+    ncpassword = NETCONF_PASS or getpass.getpass("New NETCONF account password: ")
+    if not re.fullmatch(r"[A-Za-z0-9_.@!%+=,-]+", ncpassword):
+        raise ValueError("NETCONF password must use letters, digits, or _.@!%+=,- without whitespace")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", NETCONF_USER):
+        raise ValueError("NETCONF username must use letters, digits, underscore, dot, or hyphen")
     # start logging
     netmiko_logging()
     # Create a dictionary for our device.
@@ -48,6 +54,8 @@ def main():
         "username": args.user,
         "password": getpass.getpass(),
         "response_return": None,
+        "ssh_strict": True,
+        "system_host_keys": True,
     }
     # Pass in the dict and create the connection.
     sros_conn = ConnectHandler(**sros)
@@ -62,7 +70,7 @@ def main():
             '/configure system security profile "netconf" netconf base-op-authorization lock',
             '/configure system security profile "netconf" netconf base-op-authorization kill-session',
             f"/configure system security user netconf access {NETCONF_USER}",
-            f"/configure system security user netconf password {NETCONF_PASS}",
+            f"/configure system security user netconf password {ncpassword}",
             f"/configure system security user netconf console member {NETCONF_USER}",
             "/configure system security user netconf console member 'administrative'",
             "/configure system management-interface yang-modules nokia-modules",
@@ -83,14 +91,14 @@ def main():
         disconnect(sros_conn)
 
     try:
-        config = get_netconf_config(args, NETCONF_USER, NETCONF_PASS)
+        config = get_netconf_config(args, NETCONF_USER, ncpassword)
         xml_config = xmltodict.parse(str(config))
         sys_name = xml_config["rpc-reply"]["data"]["configure"]["system"]["name"]
         create_folder(f"{BACKUP_PATH}/{sys_name}")
         save_file(f"backups/{sys_name}/{sys_name}.txt", str(config), mode="w+")
         print(f"Backed up XML Config: backups/{sys_name}/{sys_name}.txt")
-    except Exception as err_exc:
-        print(f"Error while attempting to get NETCONF config: {err_exc}")
+    except Exception:
+        print("Error while attempting to get NETCONF config; details omitted to protect credentials")
 
 
 if __name__ == "__main__":

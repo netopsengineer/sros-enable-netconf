@@ -1,6 +1,6 @@
 [run]
 branch = True
-source = ttp_sros_parser
+source = sros_enable_netconf
 
 [report]
 show_missing = true
