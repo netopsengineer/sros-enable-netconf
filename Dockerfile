@@ -3,20 +3,21 @@
 #
 #  This base stage just installs the dependencies required for production
 #  without any development deps.
-ARG PYTHON_VER=3.8
+ARG PYTHON_VER=3.14
 FROM python:${PYTHON_VER} AS base
 
 WORKDIR /usr/src/app
 
 # Install poetry for dep management
-RUN curl -sSL https://raw.githubusercontent.com/python-poetry/poetry/master/get-poetry.py | python
-ENV PATH="$PATH:/root/.poetry/bin"
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+RUN uv tool install poetry==2.5.1
 RUN poetry config virtualenvs.create false
 
 # Install project manifest
 COPY pyproject.toml poetry.lock ./
 
-RUN poetry install --no-dev
+RUN poetry install --only main --no-root --no-interaction
 
 ############
 # Unit Tests
@@ -28,7 +29,7 @@ FROM base AS test
 
 COPY . .
 
-RUN poetry install
+RUN poetry install --no-interaction
 
 ############
 # Linting
